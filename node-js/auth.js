@@ -2,31 +2,18 @@
 var object = require('./object.js');
 var logger = require('./logger.js');
 var SQL = require('./SQL.js');
+var TYPES = require('tedious').TYPES;
 var sessionManager = require("./sessionManager.js");
-var managerCookie = require('./managerCookie.js');
 var managerFiles = require('./managerFiles.js');
 var crypter = require('./crypter');
 
-var KEY_PASSWORD = ''
-var KEY_TOKEN = ''
+var KEY = `YOUR_KEY`
 var MIN_PASSWORD_LENGTH = 0
 
-
+sessionManager.init(30, 60, true, 300);
 
 var connectionOptions = {}
 //#region AUTH
-
-exports.init = function (pathConfig, PasswordCryptKey, tokenCriptKey, minPasswLength) {
-    connectionOptions = JSON.parse(managerFiles.read(pathConfig))
-    KEY_PASSWORD = PasswordCryptKey;
-    KEY_TOKEN = tokenCriptKey;
-    MIN_PASSWORD_LENGTH = minPasswLength;
-
-    if (tokenCriptKey.length < 10)
-        logger.warning("auth.js", "Token crypt key is too weak!!")
-    sessionManager.init(60, KEY_TOKEN, 300);
-}
-
 exports.login = async (req, res, next) => { // TODO sistemare login failed per token scaduto
     try {
         if (!object.isNullOrEmpty(req.body.data.username)) {
@@ -40,15 +27,13 @@ exports.login = async (req, res, next) => { // TODO sistemare login failed per t
                     if (!sessionManager.isSessionExpired(token)) {
                         logger.info("auth.js", "Login from " + userData.data.username + " Status: SUCCEDEED");
                         //managerCookie.createCookie(res, "token", token);
-                        var cookie = "token=\"" + token + "\";SameSite=Lax";
-                        res.setHeader("Set-Cookie", cookie);
                         res.status(200).json({
                             message: "login succeeded",
                             token: token
                         });
                     } else {
                         logger.warning("auth.js", "Login from " + userData.data.username + " Status: unable to retrive token")
-                        managerCookie.createCookie(res, "token", "");
+                        //managerCookie.createCookie(res, "token", "");
                         res.status(401).json({
                             message: "Unable to retrive token",
                             token: token
@@ -57,7 +42,7 @@ exports.login = async (req, res, next) => { // TODO sistemare login failed per t
                 }
                 else {
                     logger.warning("auth.js", "Login from " + req.body.data.username + " Status: Invalid userid or password")
-                    managerCookie.createCookie(res, "token", "");
+                    //managerCookie.createCookie(res, "token", "");
                     res.status(401).json({
                         message: "Invalid userid or password"
                     });
@@ -70,7 +55,7 @@ exports.login = async (req, res, next) => { // TODO sistemare login failed per t
             } catch (error) {
                 logger.warning("auth.js", "Login from unknown Status: Invalid userid or password");
             }
-            managerCookie.createCookie(res, "token", "");
+            //managerCookie.createCookie(res, "token", "");
             res.status(400).json({
                 message: "Login failed username null"
             });
@@ -84,19 +69,17 @@ exports.login = async (req, res, next) => { // TODO sistemare login failed per t
 }
 exports.logout = async (req, res, next) => {
     try {
-        var token = req.body.token
-        token = token.replace(new RegExp('"', 'g'), '')
-        var data = sessionManager.remove(token)
+        var data = sessionManager.remove(req.body.token)
         if (data != {}) {
             logger.info("auth.js", "User " + data.username + " successfully logged out.")
-            managerCookie.createCookie(res, "token", ""); // add token to the cookie page
+            //managerCookie.createCookie(res, "token", ""); // add token to the cookie page
             res.status(200).json({
                 message: "Successfully logged out"
             });
         }
         else {
             logger.warning("auth.js", "Unable to remove session");
-            managerCookie.createCookie(res, "token", ""); // add token to the cookie page
+            //managerCookie.createCookie(res, "token", ""); // add token to the cookie page
             res.status(400).json({
                 message: "Error during logged out"
             });
@@ -109,19 +92,16 @@ exports.logout = async (req, res, next) => {
 
 
 }
-
 exports.renewSession = async (req, res, next) => {
     try {
-        var token = req.body.token
-        token = token.replace(new RegExp('"', 'g'), '')
-
-        var newToken = sessionManager.renew(token);
-        if (!sessionManager.isSessionExpired(newToken)) {
-            managerCookie.createCookie(res, "token", newToken); // add token to the cookie page
-            res.status(200).json({ token: newToken });
+        var token = sessionManager.renew(req.body.token);
+        if (!sessionManager.isSessionExpired(token)) {
+            //managerCookie.createCookie(res, "token", token); // add token to the cookie page
+            res.status(200).json({ token: token });
         }
         else {
-            managerCookie.createCookie(res, "token", ""); // add token to the cookie page
+            //logger.warning("auth.js", "Renew token failed for " + req.body.token);
+            //managerCookie.createCookie(res, "token", ""); // add token to the cookie page
             res.status(401).json({
                 message: "Unable to renew session token null"
             }); // remove token to the cookie page
@@ -131,18 +111,14 @@ exports.renewSession = async (req, res, next) => {
         logger.error("auth.js", message);
         res.status(401).json({});
     }
-}
 
+
+}
 exports.isUserAuthenticated = async (req, res, next) => {
     try {
         var token = req.body.token
-        token = token.replace(new RegExp('"', 'g'), '')
-
-        var newToken = sessionManager.renew(token); //renew the token
-
-        if (newToken != ""){
-            managerCookie.createCookie(res, "token", newToken); // add token to the cookie page
-            getDataUserFromToken(newToken, function (userData) {
+        if (token != "")
+            getDataUserFromToken(token, function (userData) {
                 if (userData.result == "OK") {
                     res.locals.userData = userData.data;
                     next();
@@ -157,7 +133,6 @@ exports.isUserAuthenticated = async (req, res, next) => {
                     res.status(400).json({});
                 }
             });
-        }
         else {
             logger.warning("auth.js", "Token invalid");
             res.status(401).json({});
@@ -167,12 +142,13 @@ exports.isUserAuthenticated = async (req, res, next) => {
         logger.error("auth.js", message);
         res.status(401).json({});
     }
+
+
 }
 
 exports.RequestGetUserData = async (req, res, next) => {
     try {
         var token = req.body.token
-        token = token.replace(new RegExp('"', 'g'), '')
         if (token != "")
             getDataUserFromToken(token, function (userData) {
                 if (userData.result == "OK") {
@@ -186,7 +162,7 @@ exports.RequestGetUserData = async (req, res, next) => {
                         logger.warning("auth.js", "Unable to get userdata");
                     }
 
-                    res.status(401).json({});
+                    res.status(400).json({});
                 }
             })
     } catch (error) {
@@ -205,13 +181,11 @@ exports.changePassword = async (req, res, next) => { // old, new
         if (userdata.passw == requestData.old) {
             if (requestData.new.length >= MIN_PASSWORD_LENGTH && userdata.passw != requestData.new) {
                 logger.warning("auth.js", "User " + userdata.username + " change his password");
-                var newpass = crypter.crypt(requestData.new, KEY_PASSWORD);
-                var query = `
-                UPDATE [dbo].[UserData]
-                   SET [Password] = '${newpass}'
-                 WHERE UserID = ${userdata.userid}`
+                var param = SQL.emptyParam();
+                SQL.addInpParam(param, 'Password', TYPES.NVarChar, crypter.crypt(requestData.new, KEY))
+                SQL.addInpParam(param, 'UserId', TYPES.NVarChar, userdata.userid)
 
-                SQL.singleQuery(connectionOptions, query)
+                SQL.singleQuery(connectionOptions, `[dbo].[UpdChangePassword]`, param, true)
                     .then(function (r) {
                         res.status(200).json({});
                     }).catch(function (err) {
@@ -237,6 +211,16 @@ exports.changePassword = async (req, res, next) => { // old, new
 }
 
 
+exports.clearSession = function () {
+    sessionManager.clear();
+}
+
+exports.init = function (pathConfig, CryptKey, minPasswLength) {
+    connectionOptions = JSON.parse(managerFiles.read(pathConfig))
+    KEY = CryptKey;
+    MIN_PASSWORD_LENGTH = minPasswLength;
+}
+
 exports.initWithJson = function (jsonConfig) {
     connectionOptions = jsonConfig
 }
@@ -246,10 +230,9 @@ exports.maskSensitiveData = function (datajs) {
 }
 
 exports.getListUsersIDs = async (req, res, next) => {
-    var query = `SELECT *
-        FROM [dbo].[UserData]
-        `;
-    SQL.singleQuery(connectionOptions, query)
+    var param = SQL.emptyParam();
+
+    SQL.singleQuery(connectionOptions, `[dbo].[GetUserData]`, param, true)
         .then(function (result) {
             var list = []
             var SQLParser = require('./SQLParser');
@@ -284,14 +267,11 @@ exports.addUser = async (req, res, next) => {
 }
 
 exports.getUserIDFromUsername = function (username, callback) {
-    var query = `
-        SELECT   [UserID]
-                ,[Username]
-        FROM [dbo].[UserData]
-        WHERE CONVERT(NVARCHAR(MAX),Username)='${username}'
-    `;//userdata
 
-    SQL.singleQuery(connectionOptions, query)
+    var param = SQL.emptyParam();
+    SQL.addInpParam(param, 'Username', TYPES.NVarChar, username)
+
+    SQL.singleQuery(connectionOptions, `[dbo].[GetUserData]`, param, true)
         .then(function (result) {
             if (result.line.length == 1) {
                 var SQLParser = require('./SQLParser')
@@ -333,7 +313,7 @@ function convertQueryUserTojson(queryResult) {
             var SQLParser = require('./SQLParser')
             SQLParser.loadSQLResult(queryResult.line, queryResult.columnTitle)
 
-            var password = crypter.decrypt(SQLParser.getParameterFromLine(0, "Password"), KEY_PASSWORD)
+            var password = crypter.decrypt(SQLParser.getParameterFromLine(0, "Password"), KEY)
 
             var response = {
                 userid: Number(SQLParser.getParameterFromLine(0, "UserID")),
@@ -372,18 +352,17 @@ function maskPassword(datajs) {
 function getDataUser(username, password, callback) {
     if (!object.isNullOrEmpty(username)) //utente forse è registrato
     {
-        var query = `SELECT * 
-            FROM [dbo].[UserData] 
-            where CONVERT(NVARCHAR(MAX), Username)='${username}'
-            `;
-        SQL.singleQuery(connectionOptions, query)
+        var param = SQL.emptyParam();
+        SQL.addInpParam(param, 'Username', TYPES.NVarChar, username)
+
+        SQL.singleQuery(connectionOptions, `[dbo].[GetUserData]`, param, true)
             .then(function (result) {
                 var SQLParser = require('./SQLParser')
                 SQLParser.loadSQLResult(result.line, result.columnTitle)
 
                 if (result != null) {
                     if (result.line.length == 1) {
-                        var passw = crypter.decrypt(SQLParser.getParameterFromLine(0, "Password"), KEY_PASSWORD)
+                        var passw = crypter.decrypt(SQLParser.getParameterFromLine(0, "Password"), KEY)
                         if (passw.length >= MIN_PASSWORD_LENGTH) {
                             if (passw != password)
                                 callback({
@@ -430,7 +409,7 @@ function getDataUserFromToken(token, callback) {
     if (!object.isNullOrEmpty(token)) //se il token non è nullo
     {
         var userid = sessionManager.get(token);
-        if (!sessionManager.isSessionExpired(token) && userid>0) {
+        if (!sessionManager.isSessionExpired(token)) {
             getDataUserFromUsrId(userid, function (userdata) {
                 callback({
                     result: "OK",
@@ -457,11 +436,10 @@ function getDataUserFromToken(token, callback) {
 function getDataUserFromUsrId(usrid, callback) {
     if (!object.isNullOrEmpty(usrid) || usrid == 0) //utente forse è registrato
     {
-        var query = `SELECT *
-        FROM [dbo].[UserData]
-        where CONVERT(NVARCHAR(MAX), UserID)=${usrid}
-        `;
-        SQL.singleQuery(connectionOptions, query)
+        var param = SQL.emptyParam();
+        SQL.addInpParam(param, 'UserId', TYPES.Int, Number(usrid))
+
+        SQL.singleQuery(connectionOptions, `[dbo].[GetUserData]`, param, true)
             .then(function (result) {
                 var userData = convertQueryUserTojson(result)
                 if (userData.result == "OK")
@@ -497,28 +475,23 @@ function getDataUserFromUsrId(usrid, callback) {
 function addUser(data, callback) {
 
     if (!object.isNullOrEmpty(data.username) && !object.isNullOrEmpty(data.name) && !object.isNull(data.surname) && !object.isNull(data.password) && !object.isNullOrEmpty(data.group)) {
+        var param = SQL.emptyParam();
+        SQL.addInpParam(param, 'Username', TYPES.NVarChar, data.username)
+        SQL.addInpParam(param, 'Name', TYPES.NVarChar, data.name)
+        SQL.addInpParam(param, 'Surname', TYPES.NVarChar, data.surname)
+        SQL.addInpParam(param, 'Password', TYPES.NVarChar, crypter.crypt(data.password, KEY))
+        SQL.addInpParam(param, 'Group', TYPES.NVarChar, data.group)
 
-        usernameAlreadyExists(data.username, function (exist) {
-            if (!exist) {
-                var newpass = crypter.crypt(data.password, KEY_PASSWORD);
-                var query = `INSERT INTO [dbo].[UserData]
-                ([Username],[Name],[Surname],[Password],[Group])
-            VALUES ('${data.username}','${data.name}','${data.surname}','${newpass}','${data.group}')`
 
-                SQL.singleQuery(connectionOptions, query)
-                    .then(function (result) {
-                        callback(1);
-                    })
-                    .catch(function (err) {
-                        logger.error("auth.js", err);
-                        callback(0);
-                    })
-            }
-            else {
-                logger.error("auth.js", "User already exist!");
-                callback(-1);
-            }
-        })
+        SQL.singleQuery(connectionOptions, `[dbo].[InsUserData]`, param, true)
+            .then(function (result) {
+                callback(1);
+            })
+            .catch(function (err) {
+                logger.error("auth.js", err);
+                callback(0);
+            })
+
 
     }
     else {
@@ -527,26 +500,5 @@ function addUser(data, callback) {
     }
 
 
-}
-
-
-function usernameAlreadyExists(username, callback) {
-    var query = `SELECT * 
-            FROM [dbo].[UserData] 
-            where CONVERT(NVARCHAR(MAX), Username)='${username}'
-            `;
-
-    SQL.singleQuery(connectionOptions, query)
-        .then(function (result) {
-            if (result.line.length >= 1)
-                callback(true);
-            else
-                callback(false);
-        })
-        .catch(function (err) {
-            logger.error("auth.js", err);
-            //callback(false);
-            throw err;
-        })
 }
 
